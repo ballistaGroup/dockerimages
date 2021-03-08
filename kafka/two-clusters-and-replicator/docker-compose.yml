@@ -1,0 +1,188 @@
+# This docker-compose file builds 3 individual Kafka Clusters.
+#
+# A Kafka Connect node is placed in one cluster in order to facilitate a Replicator connector.
+#
+# Note: Zookeeper service must be running prior to the Broker service running,
+# where the Connect server cannot run until all its cluster Brokers are running.
+#
+version: '2'
+services:
+  # Create Zookeeper instances for each cluster
+  # zookeeper-src-a:
+  zookeeper-source-cluster:
+    image: confluentinc/cp-zookeeper:latest
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 22181
+      KAFKA_OPTS: "-Dzookeeper.admin.enableServer=false"
+    network_mode: host
+    extra_hosts:
+      - "moby:127.0.0.1"
+
+  # zookeeper-src-b:
+  zookeeper-destination-cluster:
+    image: confluentinc/cp-zookeeper:latest
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 32181
+      KAFKA_OPTS: "-Dzookeeper.admin.enableServer=false"
+    network_mode: host
+    extra_hosts:
+      - "moby:127.0.0.1"
+
+  # zookeeper-dest:
+  zookeeper-replicator-cluster:
+    image: confluentinc/cp-zookeeper:latest
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 42181
+      KAFKA_OPTS: "-Dzookeeper.admin.enableServer=false"
+    network_mode: host
+    extra_hosts:
+      - "moby:127.0.0.1"
+
+  # Source A Brokers
+  # Note: each Zookeeper Instance requires a minimum of 2 brokers
+  # kafka-1-src-a:
+  kafka-source-cluster-1-broker-a:
+    image: confluentinc/cp-kafka:latest
+    depends_on: 
+      - zookeeper-source-cluster
+    ports:
+      - "9092:9092"      
+    network_mode: host
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: localhost:22181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+    extra_hosts:
+      - "moby:127.0.0.1"
+
+  # kafka-2-src-a:
+  kafka-source-cluster-1-broker-b:
+    image: confluentinc/cp-kafka:latest
+    depends_on: 
+      - zookeeper-source-cluster
+    ports:
+      - "9082:9082"
+    network_mode: host
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: localhost:22181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9082
+    extra_hosts:
+      - "moby:127.0.0.1"
+
+  kafka-source-cluster-1-broker-c:
+    image: confluentinc/cp-kafka:latest
+    depends_on: 
+      - zookeeper-source-cluster
+    ports:
+      - "9002:9002"
+    network_mode: host
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: localhost:22181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9002
+    extra_hosts:
+      - "moby:127.0.0.1"
+
+  # Source B Brokers
+  # kafka-1-src-b:
+  kafka-destination-cluster-2-broker-a:
+    image: confluentinc/cp-kafka:latest
+    depends_on: 
+      - zookeeper-destination-cluster
+    ports:
+      - "9072:9072"
+    network_mode: host
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: localhost:32181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9072
+    extra_hosts:
+      - "moby:127.0.0.1"
+
+  # kafka-2-src-b:
+  kafka-destination-cluster-2-broker-b:
+    image: confluentinc/cp-kafka:latest
+    depends_on: 
+      - zookeeper-destination-cluster
+    ports:
+      - "9062:9062"
+    network_mode: host
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: localhost:32181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9062
+    extra_hosts:
+      - "moby:127.0.0.1"
+
+  # Destination Brokers
+  # Since the Destination cluster will be Bootsrapping the Connect node, it is required to have 3 brokers
+  # kafka-1-dest:
+  kafka-replicator-cluster-broker-a:
+    image: confluentinc/cp-kafka:latest
+    depends_on:
+      - zookeeper-replicator-cluster
+    ports:
+      - "9052:9052"
+    network_mode: host
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: localhost:42181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9052
+    extra_hosts:
+      - "moby:127.0.0.1"
+
+  # kafka-2-dest:
+  kafka-replicator-cluster-broker-b:
+    image: confluentinc/cp-kafka:latest
+    depends_on:
+      - zookeeper-replicator-cluster
+    ports:
+      - "9042:9042"
+    network_mode: host
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: localhost:42181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9042
+    extra_hosts:
+      - "moby:127.0.0.1"
+
+  # kafka-3-dest:
+  kafka-replicator-cluster-broker-c:
+    image: confluentinc/cp-kafka:latest
+    depends_on:
+      - zookeeper-replicator-cluster
+    ports:
+      - "9032:9032"
+    network_mode: host
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: localhost:42181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9032
+    extra_hosts:
+      - "moby:127.0.0.1"
+
+  # Connector Node
+  # Note: 
+  #   - "cp-enterprise-replicator" is used in lieu of "cp-connect" due to having the replicator connectors installed and configured out-of-the-box
+  #   - 2 GB's of memory is required for Connect to run, or it will automatically shutdown
+  #   - JSON can override default parameters for Connect
+  # connect-host:
+  connect-host:
+    image: confluentinc/cp-enterprise-replicator:latest
+    depends_on: 
+      - kafka-replicator-cluster-broker-c
+      - kafka-replicator-cluster-broker-b
+      - kafka-replicator-cluster-broker-a
+    network_mode: host
+    restart: on-failure:3
+    mem_limit: 2048m
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: localhost:9052,localhost:9042,localhost:9032
+      CONNECT_REST_PORT: 38082
+      CONNECT_GROUP_ID: "default"
+      CONNECT_CONFIG_STORAGE_TOPIC: "default.config"
+      CONNECT_OFFSET_STORAGE_TOPIC: "default.offsets"
+      CONNECT_STATUS_STORAGE_TOPIC: "default.status"
+      CONNECT_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_REST_ADVERTISED_HOST_NAME: "localhost"
+      CONNECT_PLUGIN_PATH: /usr/share/java
+      CONNECT_LOG4J_ROOT_LOGLEVEL: DEBUG
+      CONNECT_LOG4J_LOGGERS: org.apache.zookeeper=ERROR,org.I0Itec.zkclient=ERROR,org.reflections=ERROR
+    volumes:
+      - /tmp/replicator-host-cluster-test/:/tmp/test
+    extra_hosts:
+      - "moby:127.0.0.1"
